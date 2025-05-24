@@ -1,44 +1,44 @@
-from flask import Flask, request, send_file, jsonify
-import os
-import uuid
-import subprocess
-import threading
-import time
+from flask import Flask, request, jsonify
+from yt_dlp import YoutubeDL
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
-DOWNLOAD_FOLDER = "downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+@app.route('/')
+def home():
+    return jsonify({"message": "Welcome to the Facebook Video Info API. Use /fbdl?url=..."})
 
-def delete_file_after_delay(filepath, delay=600):
-    def delete():
-        time.sleep(delay)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    threading.Thread(target=delete, daemon=True).start()
+@app.route('/fbdl', methods=['GET'])
+def get_fb_video_info():
+    video_url = request.args.get('url')
+    if not video_url:
+        return jsonify({"error": "Missing 'url' parameter"}), 400
 
-@app.route("/fbdl", methods=["GET"])
-def download_facebook_video():
-    link = request.args.get("link")
-    if not link or "facebook.com" not in link:
-        return jsonify({"error": "Invalid or missing Facebook link"}), 400
-
-    file_id = str(uuid.uuid4())
-    output_path = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.mp4")
+    ydl_opts = {
+        'quiet': True,
+        'skip_download': True,
+        'forcejson': True,
+        'nocheckcertificate': True,
+        'geo_bypass': True,
+    }
 
     try:
-        subprocess.run([
-            "yt-dlp", "-o", output_path, link
-        ], check=True)
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
 
-        if not os.path.exists(output_path):
-            return jsonify({"error": "Download failed"}), 500
+        result = {
+            "title": info.get("title"),
+            "duration": info.get("duration"),
+            "thumbnail": info.get("thumbnail"),
+            "uploader": info.get("uploader"),
+            "direct_url": info.get("url"),
+            "formats": info.get("formats")
+        }
+        return jsonify(result)
 
-        delete_file_after_delay(output_path)
-        return send_file(output_path, as_attachment=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    except subprocess.CalledProcessError:
-        return jsonify({"error": "Download command failed"}), 500
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
